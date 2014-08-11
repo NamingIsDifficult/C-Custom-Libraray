@@ -1,0 +1,343 @@
+using System;
+using System.Collections;
+using System.Collections.Generic;
+using System.Linq;
+using System.Text;
+using System.Data;
+using System.IO;
+using System.Web.UI;
+using System.Reflection;
+using System.Web;
+using System.Xml;
+
+namespace You.Ctrip.Com.BGManager.Common
+{
+    public class Excel
+    {
+        private Page _Page;
+        private string _ExcelTitle;
+        private string _FileName;
+        private List<string> TitleSequence = new List<string>();
+        private List<string> KeySequence = new List<string>();
+        private static XmlDocument XMLConfig = new XmlDocument();
+        private XmlNode _templateNode;
+
+        /// <summary>
+        /// 构造函数
+        /// </summary>
+        /// <param name="page"></param>
+        /// <param name="templateId"></param>
+        public Excel(Page page, string templateId)
+            : this(page, templateId, "Report")
+        {
+        }
+
+        /// <summary>
+        /// 构造函数
+        /// </summary>
+        /// <param name="page"></param>
+        /// <param name="templateId"></param>
+        /// <param name="fileName"></param>
+        public Excel(Page page, string templateId, string fileName)
+        {
+            _Page = page;
+            _FileName = fileName;
+            string sDirectory = HttpContext.Current.Server.MapPath("../../");
+            XMLConfig.Load(sDirectory + "/Config/ExcelExportConfig.xml");
+            InitExcelTemplate(templateId, TitleSequence, KeySequence);
+        }
+
+        /// <summary>
+        /// 导出最简单的Excel(.xls)
+        /// </summary>
+        /// <param name="dataSource">数据源（IEnumerable对象）</param>
+        public void Export(IEnumerable dataSource)
+        {
+            Export(dataSource, ExportType.Simplest);
+        }
+
+        /// <summary>
+        /// 根据导出类型导出Excel文档
+        /// </summary>
+        /// <param name="dataSource">数据源（IEnumerable对象）</param>
+        /// <param name="type">导出类型</param>
+        public void Export(IEnumerable dataSource, ExportType type)
+        {
+            switch (type)
+            {
+                case ExportType.Simplest:
+                    ExportSimpleExcel(dataSource);
+                    break;
+                case ExportType.FromXML:
+                    ExportXmlExcel(dataSource);
+                    break;
+                default:
+                    break;
+            }
+        }
+
+        /// <summary>
+        /// 导出多个sheet
+        /// </summary>
+        /// <param name="sheetCollection"></param>
+        public void MultiSheetExport(IEnumerable<SingleSheet> sheetCollection)
+        {
+            var xmlSw = new StringWriter();
+            OutputXmlHead(xmlSw);
+            foreach (var singleSheet in sheetCollection)
+            {
+                var titleSequence = new List<string>();
+                var keySequence = new List<string>();
+                InitExcelTemplate(singleSheet.TemplateId, titleSequence, keySequence);
+                OutputXmlBody(singleSheet.SheetName, xmlSw, singleSheet.DataSource, titleSequence, keySequence);
+            }
+            OutputExcel(xmlSw);
+        }
+
+        /// <summary>
+        /// 导出最简单的excel
+        /// </summary>
+        /// <param name="dataSource"></param>
+        private void ExportSimpleExcel(IEnumerable dataSource)
+        {
+            var simplestSw = new StringWriter();
+            var sb = new StringBuilder();
+            foreach (string sTitle in TitleSequence)
+            {
+                sb.AppendFormat("{0}\t", sTitle);
+            }
+            _ExcelTitle = sb.ToString();
+            simplestSw.WriteLine(_ExcelTitle);
+            foreach (var instance in dataSource)
+            {
+                PropertyInfo[] properties = instance.GetType().GetProperties();
+                var bodyBuilder = new StringBuilder();
+                var body = new string[KeySequence.Count];
+                foreach (PropertyInfo property in properties)
+                {
+                    for (int i = 0; i < KeySequence.Count; i++)
+                    {
+                        if (property.Name.ToLower() == KeySequence[i].ToLower())
+                        {
+                            body[i] = property.GetValue(instance, null) != null
+                                ? property.GetValue(instance, null).ToString()
+                                : "";
+                            break;
+                        }
+                    }
+                }
+                foreach (string sProperty in body)
+                {
+                    bodyBuilder.AppendFormat("{0}\t", sProperty);
+                }
+                simplestSw.WriteLine(bodyBuilder.ToString());
+            }
+            simplestSw.Close();
+            _Page.Response.AddHeader("Content-Disposition",
+                "attachment; filename=" + _FileName + ".xls");
+            _Page.Response.ContentType = "application/ms-excel";
+            _Page.Response.ContentEncoding = Encoding.GetEncoding("GB2312");
+            _Page.Response.Write(simplestSw);
+            _Page.Response.End();
+        }
+        /// <summary>
+        /// 导出xml  excel
+        /// </summary>
+        /// <param name="dataSource"></param>
+        private void ExportXmlExcel(IEnumerable dataSource)
+        {
+            var xmlSw = new StringWriter();
+            OutputXmlHead(xmlSw);
+            OutputXmlBody("Sheet1", xmlSw, dataSource, TitleSequence, KeySequence);
+            OutputExcel(xmlSw);
+        }
+
+        private string EscapeHTMLCode(string sOriginalString)
+        {
+            string sReturn = string.Empty;
+            sReturn = sOriginalString.Replace("<", "&lt;").Replace(">", "&gt;");
+            return sReturn;
+        }
+
+        private void InitExcelTemplate(string templateId, ICollection<string> titleSequence, ICollection<string> keySequence)
+        {
+            if (!string.IsNullOrEmpty(templateId))
+            {
+                XmlNodeList template = XMLConfig.GetElementsByTagName("Template");
+                foreach (XmlNode node in template)
+                {
+                    if (node.Attributes != null && node.Attributes[0].Value == templateId)
+                    {
+                        _templateNode = node;
+                        break;
+                    }
+                }
+                if (_templateNode != null)
+                {
+                    XmlNodeList templateSubNodes = _templateNode.ChildNodes;
+                    foreach (XmlNode node in templateSubNodes)
+                    {
+                        if (node.Name == "Title")
+                        {
+                            XmlNodeList titleList = node.ChildNodes;
+                            foreach (XmlNode columnNode in titleList)
+                            {
+                                foreach (XmlNode subNode in columnNode.ChildNodes)
+                                {
+                                    if (subNode.Name == "Key" && !string.IsNullOrEmpty(subNode.InnerText))
+                                    {
+                                        keySequence.Add(subNode.InnerText);
+                                    }
+                                    else if (subNode.Name == "Text" && !string.IsNullOrEmpty(subNode.InnerText))
+                                    {
+                                        titleSequence.Add(subNode.InnerText);
+                                    }
+                                }
+                            }
+                        }
+                        else if (node.Name == "Style")
+                        {
+
+                        }
+                    }
+                }
+            }
+        }
+
+        private void OutputXmlHead(StringWriter xmlSw)
+        {
+
+            if (_Page.Request.UserAgent != null &&
+                _Page.Request.UserAgent.ToLower().IndexOf("firefox", StringComparison.Ordinal) > -1)
+                _Page.Response.AddHeader("Content-Disposition", "attachment;filename=" + _FileName + ".xls");
+            else
+                _Page.Response.AddHeader("Content-Disposition",
+                    "attachment;filename=" + _FileName + ".xls");
+            _Page.Response.ContentEncoding = Encoding.UTF8;
+            _Page.Response.ContentType = "application/ms-excel";
+            xmlSw.WriteLine("<?xml version=\"1.0\"?>");
+            xmlSw.WriteLine("<?mso-application progid=\"Excel.Sheet\"?>");
+            xmlSw.WriteLine("<Workbook xmlns=\"urn:schemas-microsoft-com:office:spreadsheet\"");
+            xmlSw.WriteLine(" xmlns:o=\"urn:schemas-microsoft-com:office:office\" ");
+            xmlSw.WriteLine(" xmlns:x=\"urn:schemas-microsoft-com:office:excel\" ");
+            xmlSw.WriteLine(" xmlns:ss=\"urn:schemas-microsoft-com:office:spreadsheet\"");
+            xmlSw.WriteLine(" xmlns:ul=\"urn:schemas-microsoft-com:office:spread sheet\"");
+            xmlSw.WriteLine(" xmlns:html=\"http://www.w3.org/TR/REC-html40\">");
+            xmlSw.WriteLine(" <Styles>");
+            xmlSw.WriteLine(" <Style ss:ID=\"headerstyle\">");
+            xmlSw.WriteLine(" <Alignment ss:Horizontal=\"Center\" ss:Vertical=\"Center\"/>");
+            xmlSw.WriteLine(" <Borders>" +
+                            "<Border ss:Position=\"Bottom\" ss:LineStyle=\"Continuous\" ss:Weight=\"1\"/>" +
+                            "<Border ss:Position=\"Left\" ss:LineStyle=\"Continuous\" ss:Weight=\"1\"/>" +
+                            "<Border ss:Position=\"Right\" ss:LineStyle=\"Continuous\" ss:Weight=\"1\"/>" +
+                            "<Border ss:Position=\"Top\" ss:LineStyle=\"Continuous\" ss:Weight=\"1\"/>" +
+                            "</Borders>");
+            xmlSw.WriteLine(
+                " <Font ss:FontName=\"宋体\" x:CharSet=\"134\" ss:Size=\"11\" ss:Color=\"#000000\" ss:Bold=\"1\"/>");
+            xmlSw.WriteLine(" <Interior ss:Color=\"#33CCFF\" ss:Pattern=\"Solid\"/>");
+            xmlSw.WriteLine(" </Style>");
+            xmlSw.WriteLine(" <Style ss:ID=\"bodystyle\">");
+            xmlSw.WriteLine(" <Borders>" +
+                            "<Border ss:Position=\"Bottom\" ss:LineStyle=\"Continuous\" ss:Weight=\"1\"/>" +
+                            "<Border ss:Position=\"Left\" ss:LineStyle=\"Continuous\" ss:Weight=\"1\"/>" +
+                            "<Border ss:Position=\"Right\" ss:LineStyle=\"Continuous\" ss:Weight=\"1\"/>" +
+                            "<Border ss:Position=\"Top\" ss:LineStyle=\"Continuous\" ss:Weight=\"1\"/>" +
+                            "</Borders>");
+            xmlSw.WriteLine(" </Style>");
+            xmlSw.WriteLine(" </Styles>");
+        }
+
+        private void OutputXmlBody(string sheetName, StringWriter xmlSw, IEnumerable dataSource, IEnumerable<string> titleSequence,
+            IList<string> keySequence)
+        {
+            xmlSw.WriteLine("<Worksheet ss:Name=\"" + sheetName + "\">");
+            xmlSw.WriteLine(
+                " <Table x:FullColumns=\"1\" x:FullRows=\"1\" ss:DefaultColumnWidth=\"100\" ss:DefaultRowHeight=\"13.5\">");
+            var xmlTitleBuilder = new StringBuilder();
+            xmlSw.WriteLine("<Row ss:AutoFitHeight=\"0\">");
+            foreach (string sTitle in titleSequence)
+            {
+                xmlTitleBuilder.AppendFormat(
+                    "<Cell ss:StyleID=\"headerstyle\"><Data ss:Type=\"String\">{0}</Data><NamedCell ss:Name=\"_FilterDatabase\"/></Cell>",
+                    sTitle);
+            }
+            xmlSw.WriteLine(xmlTitleBuilder.ToString());
+            xmlSw.WriteLine("</Row>");
+            if (dataSource != null)
+            {
+                foreach (var instance in dataSource)
+                {
+                    xmlSw.WriteLine("<Row ss:AutoFitHeight=\"0\">");
+                    PropertyInfo[] properties = instance.GetType().GetProperties();
+                    var bodyBuilder = new StringBuilder();
+                    var body = new string[keySequence.Count];
+                    foreach (PropertyInfo property in properties)
+                    {
+                        for (int i = 0; i < keySequence.Count; i++)
+                        {
+                            if (property.Name.ToLower() == keySequence[i].ToLower())
+                            {
+                                string propertyValue = property.GetValue(instance, null) != null
+                                    ? property.GetValue(instance, null).ToString()
+                                    : "";
+                                if (property.PropertyType.FullName == "System.Double" &&
+                                    propertyValue.LastIndexOf(".", StringComparison.Ordinal) != -1
+                                    &&
+                                    propertyValue.Substring(propertyValue.LastIndexOf(".", StringComparison.Ordinal),
+                                        propertyValue.Length - propertyValue.LastIndexOf(".", StringComparison.Ordinal))
+                                        .Length > 4)
+                                {
+                                    body[i] = propertyValue.Substring(0,
+                                        propertyValue.LastIndexOf(".", StringComparison.Ordinal) + 4);
+                                }
+                                else
+                                {
+                                    body[i] = propertyValue;
+                                }
+                                break;
+                            }
+                        }
+                    }
+                    foreach (string sProperty in body)
+                    {
+                        bodyBuilder.AppendFormat(
+                            "<Cell ss:StyleID=\"bodystyle\"><Data ss:Type=\"String\">{0}</Data></Cell>",
+                            EscapeHTMLCode(sProperty));
+                    }
+                    xmlSw.WriteLine(bodyBuilder.ToString());
+                    xmlSw.WriteLine("</Row>");
+                }
+            }
+            xmlSw.WriteLine("</Table>");
+            xmlSw.WriteLine(" <AutoFilter x:Range=\"R1C1:R1C100\""
+                            + " xmlns=\"urn:schemas-microsoft-com:office:excel\">"
+                            + " </AutoFilter>");
+            xmlSw.WriteLine("</Worksheet>");
+        }
+
+        private void OutputExcel(StringWriter xmlSw)
+        {
+            xmlSw.WriteLine("</Workbook>");
+            xmlSw.Close();
+            _Page.Response.Write(xmlSw);
+            _Page.Response.End();
+        }
+    }
+
+    /// <summary>
+    /// 导出类型
+    /// </summary>
+    public enum ExportType
+    {
+        Simplest = 1,
+        FromXML = 2,
+    }
+
+    public class SingleSheet
+    {
+        public string TemplateId { get; set; }
+        public string SheetName { get; set; }
+
+        public IEnumerable DataSource { get; set; }
+    }
+}
