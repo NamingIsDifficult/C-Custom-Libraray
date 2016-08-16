@@ -1,103 +1,115 @@
-public static void MergeSort(List<long> numbs, bool isSortAsc = true)
+/归并排序
+        public static void MergeSort(ref List<long> numbs, bool isOrderAsc = true)
         {
-            //1.新建一个与序列长度length相同的空序列,令步长sortedParticleLength=1，合并层数mergeLevel=1,
-            //2.如果sortedParticleLength<length,转至步骤3，否则跳转至步骤4
-            //3.从序列下标0开始，以长度为sortedParticleLength对序列进行分组，groupCount=length/(sortedParticleLength*2)的序列均是已排序的，将所有相邻的下标为
-            //[sortedParticleLength,sortedParticleLength*2]的分组与[sortedParticleLength*2,sortedParticleLength*3]的分组进行合并;
-            //同时记录余数分组[length-length%sortedParticleLength*2,length-length%sortedParticleLength*2+sortedParticleLength]，mergeLevel+=1,sortedParticleLength=sortedParticleLength*2
-            //将本次合并的余数分组与上次合并的余数分组进行合并，然后返回步骤2
-            //4.如果有余数分组，合并余数分组与余数分组以外的序列，算法结束
-            var displacementList = new List<long>(numbs.Count);
-            int length = numbs.Count, sortedParticleLength = 1, mergeLevel = 1;
-            for (int index = 0; index < length; index++) {
+            //1.创建一个与输入序列长度相同的空序列，令序列长度为length，令sortedSequenceLength=1,mergeLevel=1,preResidual=null跳转至步骤2
+            //2.如果sortedSequenceLength<length,跳转至步骤3，否则跳转至步骤5
+            //3.令分组groupCount=length/sortedSequenceLength*2,sequenceCount = length/sortedSequenceLength,将相邻的序列长度为sortedSequence的分组进行合并，sortedSequenceLength*=2，mergeLevel+=1
+            //，如果sequenceCount为奇数，跳转至步骤4，否则返回步骤2；
+            //4.如果preResidual不为null,将多出来的一个分组与preResidual进行合并，否则覆盖,返回步骤2.
+            //5.算法结束。
+            int length = numbs.Count, sortedSequenceLength = 1, mergeLevel = 1;
+            MergeSortIndex preRedisidual = null;
+            var displacementList = new List<long>(length);
+            List<long> finalTargetList = null;
+            for (int index = 0; index < length; index++)
+            {
                 displacementList.Add(0);
             }
-            MergeSortIndex preResidualIndex = new MergeSortIndex();
-            for (; sortedParticleLength < length; sortedParticleLength *= 2)
+            for (; sortedSequenceLength < length; sortedSequenceLength *= 2)
             {
-                var groupLength = sortedParticleLength * 2;
-                var groupCount = length / groupLength;
-                var sourceList = mergeLevel % 2 == 0 ? displacementList : numbs;
-                var targetList = mergeLevel % 2 == 0 ? numbs : displacementList;
-                for (int group = 0; group < groupCount; group++)
+                var groupLength = sortedSequenceLength*2;
+                var sequenceCount = length/sortedSequenceLength;
+                var groupCount = length/groupLength;
+                var sourceList = mergeLevel%2 == 0 ? displacementList : numbs;
+                var targetList = mergeLevel%2 == 0 ? numbs : displacementList;
+                for (var groupIndex = 0; groupIndex < groupCount; groupIndex++)
                 {
-                    var startIndex = group * groupLength;
+                    var startIndex = groupIndex*groupLength;
                     Merge(sourceList, targetList,
-                        new MergeSortIndex { StartIndex = startIndex, EndIndex = startIndex + sortedParticleLength - 1 },
-                        new MergeSortIndex { StartIndex = startIndex + sortedParticleLength, EndIndex = startIndex + groupLength - 1 },
-                        new MergeSortIndex { StartIndex = startIndex, EndIndex = startIndex + groupLength - 1 }, isSortAsc);
+                        new MergeSortIndex {StartIndex = startIndex, EndIndex = startIndex + sortedSequenceLength - 1},
+                        new MergeSortIndex
+                        {
+                            StartIndex = startIndex + sortedSequenceLength,
+                            EndIndex = startIndex + groupLength - 1
+                        },
+                        new MergeSortIndex {StartIndex = startIndex, EndIndex = startIndex + groupLength - 1},
+                        isOrderAsc);
                 }
-                var residual = length % groupLength;
-                if (residual > 0)
+                if (sequenceCount%2 != 0)
                 {
-                    var hasPreRedidual = residual > preResidualIndex.EndIndex - preResidualIndex.StartIndex && preResidualIndex.StartIndex!=0;
-                    var startIndex = length - residual;
-                    if (hasPreRedidual)
+                    var startIndex = (sequenceCount - 1)*sortedSequenceLength;
+                    if (preRedisidual == null)
                     {
-                        Merge(sourceList, targetList,
-                            new MergeSortIndex { StartIndex = preResidualIndex.StartIndex, EndIndex = preResidualIndex.EndIndex },
-                            new MergeSortIndex { StartIndex = startIndex, EndIndex = startIndex + sortedParticleLength - 1 },
-                            new MergeSortIndex { StartIndex = startIndex, EndIndex = length - 1 }, isSortAsc);
-                        preResidualIndex.StartIndex = startIndex;
-                    }
-                    else
-                    {
-                        preResidualIndex = new MergeSortIndex
+                        preRedisidual = new MergeSortIndex
                         {
                             StartIndex = startIndex,
                             EndIndex = length - 1
                         };
+                        for (int index = startIndex; index < length; index++)
+                        {
+                            targetList[index] = sourceList[index];
+                        }
                     }
-
-                }
-                mergeLevel += 1;
-            }
-            var finalSourceList = mergeLevel % 2 == 0 ? displacementList : numbs;
-            var finalTargetList = mergeLevel % 2 == 0 ? numbs : displacementList;
-            Merge(finalSourceList,finalTargetList,
-                             new MergeSortIndex { StartIndex = preResidualIndex.StartIndex, EndIndex = preResidualIndex.EndIndex },
-                             new MergeSortIndex { StartIndex = 0, EndIndex = preResidualIndex.StartIndex - 1 },
-                             new MergeSortIndex { StartIndex = 0, EndIndex = length - 1 }, isSortAsc);
-            numbs = finalTargetList;            
-        }
-        
-        private static void Merge(List<long> source, List<long> target,MergeSortIndex index1,MergeSortIndex index2,MergeSortIndex containerIndex,bool isSortAsc=true) {
-            //1.令合并区间为containerIndex.StartIndex--containerIndex.EndIndex,如果containerIndex.StartIndex<containerIndex.EndIndex则
-            //跳转至步骤2，否则结束合并
-            //2.按照算法的假设，Index1,index2对应的区间的值都已排序，比对区间的index.StartIndex对应的值，将小的值放入目标列表的containerIndex.StartIndex
-            //下标对应的位置，containerIndex.StartIndex+=1；该值对应的index.StartIndex+=1，如果index1,index2中有一个index.StartIndex>index.EndIndex,返回步骤1；
-            //否则结束算法
-            for (var index = containerIndex.StartIndex; index <= containerIndex.EndIndex; index++) {
-                var isIndex1Empty = index1.StartIndex > index1.EndIndex;
-                var isIndex2Empty = index2.StartIndex > index2.EndIndex;
-                var val1 = isIndex1Empty ? 0 : source[index1.StartIndex];
-                var val2 = isIndex2Empty ? 0 : source[index2.StartIndex];
-                if (!isIndex1Empty && !isIndex2Empty)
-                {
-                    if (isSortAsc ? val1 < val2 : val1 > val2)
+                    else
                     {
-                        target[index] = val1;
+                        Merge(sourceList, targetList,
+                            new MergeSortIndex
+                            {
+                                StartIndex = startIndex,
+                                EndIndex = startIndex + sortedSequenceLength - 1
+                            },
+                            new MergeSortIndex
+                            {
+                                StartIndex = preRedisidual.StartIndex,
+                                EndIndex = length - 1
+                            },
+                            new MergeSortIndex {StartIndex = startIndex, EndIndex = length - 1}, isOrderAsc);
+                        preRedisidual.StartIndex = startIndex;
+                    }
+                }
+                finalTargetList = targetList;
+                mergeLevel++;
+            }
+            numbs =finalTargetList;
+        }
+
+        private static void Merge(List<long> sourceList, List<long> targetList, MergeSortIndex index1,
+            MergeSortIndex index2, MergeSortIndex container, bool isOrderAsc = true)
+        {
+            for (var index = container.StartIndex; index <= container.EndIndex; index++)
+            {
+                var array1IsEmpty = index1.StartIndex > index1.EndIndex;
+                var array2IsEmpty = index2.StartIndex > index2.EndIndex;
+                if (!array1IsEmpty && !array2IsEmpty)
+                {
+                    var val1 = sourceList[index1.StartIndex];
+                    var val2 = sourceList[index2.StartIndex];
+                    if (isOrderAsc ? val1 < val2 : val1 > val2)
+                    {
+                        targetList[index] = val1;
                         index1.StartIndex += 1;
                     }
                     else
                     {
-                        target[index] = val2;
+                        targetList[index] = val2;
                         index2.StartIndex += 1;
                     }
                 }
-                else if (isIndex1Empty && !isIndex2Empty)
+                else if (array1IsEmpty && !array2IsEmpty)
                 {
-                    target[index] = val2;
+                    targetList[index] = sourceList[index2.StartIndex];
                     index2.StartIndex += 1;
                 }
-                else if (!isIndex1Empty)
+                else if (!array1IsEmpty)
                 {
-                    target[index] = val1;
+                    targetList[index] = sourceList[index1.StartIndex];
                     index1.StartIndex += 1;
                 }
             }
         }
-        private class MergeSortIndex {
+
+        private class MergeSortIndex
+        {
             public int StartIndex { get; set; }
             public int EndIndex { get; set; }
         }
